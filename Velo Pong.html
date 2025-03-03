@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pong Spiel</title>
+  <style>
+    body {
+      text-align: center;
+      background: black;
+      color: white;
+    }
+    canvas {
+      display: block;
+      margin: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Pong</h1>
+  <canvas id="pongCanvas" width="1000" height="600"></canvas>
+  <script>
+    // Globaler Multiplikator für 50% mehr Geschwindigkeit
+    const speedMultiplier = 1.5;
+    
+    // Hintergrundfarbe wählen
+    let bgColor = prompt("Wähle eine Hintergrundfarbe (z.B. white, black, red, green, blue):", "white") || "white";
+    // Spielernamen abfragen
+    const player1Name = prompt("Spieler 1, gib deinen Namen ein:", "Player 1") || "Player 1";
+    const player2Name = prompt("Spieler 2, gib deinen Namen ein:", "Player 2") || "Player 2";
+    
+    // Variable für die Krone: Wer hat aktuell die Krone?
+    let crownOwner = "";
+    
+    const canvas = document.getElementById("pongCanvas");
+    const ctx = canvas.getContext("2d");
+    
+    // Initialer Spielzustand
+    let gameState = {
+      playerY: 600 / 2 - 80 / 2,      // linkes Paddel (Höhe 80)
+      opponentY: 600 / 2 - 80 / 2,      // rechtes Paddel
+      ballX: 1000 / 2,
+      ballY: 600 / 2,
+      ballSpeedX: 4 * speedMultiplier,
+      ballSpeedY: 4 * speedMultiplier,
+      playerScore: 0,
+      opponentScore: 0,
+      timer: 50,                      // Timer in Sekunden
+      background: bgColor,
+      gameOver: false,
+      winner: ""
+    };
+    
+    let ballAngle = 0;
+    let ballTrail = [];      // Speichert frühere Positionen & Drehwinkel des Balls
+    
+    // Konfetti-Variablen
+    let confettiParticles = [];
+    let confettiTimer = 0;   // z. B. 180 Frames = 3 Sekunden
+    
+    // Ballbild laden (z. B. eine Velo-Snus-Dose)
+    const ballImg = new Image();
+    ballImg.src = "image.png";
+    let imageLoaded = false;
+    ballImg.onload = () => { imageLoaded = true; };
+    
+    // Tastatureingaben (W/S für Spieler 1, Pfeiltasten für Spieler 2)
+    let keys = {};
+    document.addEventListener("keydown", (e) => { keys[e.key] = true; });
+    document.addEventListener("keyup", (e) => { keys[e.key] = false; });
+    
+    // Für eine exaktere Timersteuerung
+    let lastTime = performance.now();
+    
+    function resetBall() {
+      gameState.ballX = 1000 / 2;
+      gameState.ballY = 600 / 2;
+      gameState.ballSpeedX = 4 * speedMultiplier * (Math.random() > 0.5 ? 1 : -1);
+      gameState.ballSpeedY = 4 * speedMultiplier * (Math.random() > 0.5 ? 1 : -1);
+      ballAngle = 0;
+      ballTrail = [];
+    }
+    
+    function createConfetti() {
+      confettiParticles = [];
+      for (let i = 0; i < 100; i++) {
+        confettiParticles.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          dx: (Math.random() - 0.5) * 5,
+          dy: Math.random() * 3 + 1,
+          color: "hsl(" + Math.floor(Math.random() * 360) + ", 100%, 50%)",
+          size: Math.random() * 5 + 2
+        });
+      }
+    }
+    
+    function updateConfetti() {
+      confettiParticles.forEach(particle => {
+        particle.x += particle.dx;
+        particle.y += particle.dy;
+        particle.dy += 0.1;
+      });
+    }
+    
+    function drawConfetti() {
+      confettiParticles.forEach(particle => {
+        ctx.fillStyle = particle.color;
+        ctx.fillRect(particle.x, particle.y, particle.size, particle.size);
+      });
+    }
+    
+    function update() {
+      let now = performance.now();
+      let deltaTime = now - lastTime;
+      lastTime = now;
+      
+      // Timer aktualisieren (50% schneller)
+      if (!gameState.gameOver && gameState.timer > 0) {
+        gameState.timer -= (deltaTime / 1000) * speedMultiplier;
+        if (gameState.timer < 0) {
+          gameState.timer = 0;
+        }
+      }
+      
+      if (gameState.gameOver) {
+        updateConfetti();
+        if (confettiTimer > 0) {
+          confettiTimer--;
+        } else {
+          resetGame();
+        }
+        return;
+      }
+      
+      // Paddelbewegung: 7 * speedMultiplier (also 10,5)
+      if (keys["w"]) gameState.playerY -= 7 * speedMultiplier;
+      if (keys["s"]) gameState.playerY += 7 * speedMultiplier;
+      if (gameState.playerY < 0) gameState.playerY = 0;
+      if (gameState.playerY > 600 - 80) gameState.playerY = 600 - 80;
+      
+      if (keys["ArrowUp"]) gameState.opponentY -= 7 * speedMultiplier;
+      if (keys["ArrowDown"]) gameState.opponentY += 7 * speedMultiplier;
+      if (gameState.opponentY < 0) gameState.opponentY = 0;
+      if (gameState.opponentY > 600 - 80) gameState.opponentY = 600 - 80;
+      
+      // Ball aktualisieren (Geschwindigkeit wurde bereits beim Reset erhöht)
+      gameState.ballX += gameState.ballSpeedX;
+      gameState.ballY += gameState.ballSpeedY;
+      ballAngle += 0.1;
+      
+      // Ballspur aktualisieren (maximale Länge orientiert sich an der aktuellen Geschwindigkeit)
+      ballTrail.push({ x: gameState.ballX, y: gameState.ballY, angle: ballAngle });
+      let currentSpeed = Math.sqrt(gameState.ballSpeedX ** 2 + gameState.ballSpeedY ** 2);
+      let maxTrailLength = Math.floor(currentSpeed * 10);
+      if (ballTrail.length > maxTrailLength) {
+        ballTrail.shift();
+      }
+      
+      // Kollision oben/unten (Ballradius = 40)
+      if (gameState.ballY - 40 <= 0 || gameState.ballY + 40 >= 600) {
+        gameState.ballSpeedY = -gameState.ballSpeedY;
+      }
+      
+      // Kollision mit linkem Paddel
+      if (
+        gameState.ballX - 40 <= 10 &&
+        gameState.ballY > gameState.playerY &&
+        gameState.ballY < gameState.playerY + 80
+      ) {
+        if (gameState.playerScore < gameState.opponentScore) {
+          gameState.ballSpeedX = -gameState.ballSpeedX * 1.5;
+        } else {
+          gameState.ballSpeedX = -gameState.ballSpeedX * 1.1;
+        }
+      }
+      
+      // Kollision mit rechtem Paddel
+      if (
+        gameState.ballX + 40 >= 1000 - 10 &&
+        gameState.ballY > gameState.opponentY &&
+        gameState.ballY < gameState.opponentY + 80
+      ) {
+        if (gameState.opponentScore < gameState.playerScore) {
+          gameState.ballSpeedX = -gameState.ballSpeedX * 1.5;
+        } else {
+          gameState.ballSpeedX = -gameState.ballSpeedX * 1.1;
+        }
+      }
+      
+      // Links aus: Spieler 2 erzielt Tor
+      if (gameState.ballX < 0) {
+        if (gameState.timer <= 0) {
+          gameState.winner = player2Name;
+          gameState.gameOver = true;
+          confettiTimer = 180;
+          createConfetti();
+          crownOwner = player2Name;
+        } else {
+          gameState.opponentScore++;
+          if (gameState.opponentScore >= 6) {
+            gameState.winner = player2Name;
+            gameState.gameOver = true;
+            confettiTimer = 180;
+            createConfetti();
+            crownOwner = player2Name;
+          } else {
+            resetBall();
+          }
+        }
+      }
+      
+      // Rechts aus: Spieler 1 erzielt Tor
+      if (gameState.ballX > 1000) {
+        if (gameState.timer <= 0) {
+          gameState.winner = player1Name;
+          gameState.gameOver = true;
+          confettiTimer = 180;
+          createConfetti();
+          crownOwner = player1Name;
+        } else {
+          gameState.playerScore++;
+          if (gameState.playerScore >= 6) {
+            gameState.winner = player1Name;
+            gameState.gameOver = true;
+            confettiTimer = 180;
+            createConfetti();
+            crownOwner = player1Name;
+          } else {
+            resetBall();
+          }
+        }
+      }
+    }
+    
+    function resetGame() {
+      gameState.playerScore = 0;
+      gameState.opponentScore = 0;
+      gameState.gameOver = false;
+      resetBall();
+      gameState.timer = 50;
+      gameState.playerY = 600 / 2 - 80 / 2;
+      gameState.opponentY = 600 / 2 - 80 / 2;
+      confettiParticles = [];
+    }
+    
+    function draw() {
+      ctx.save();
+      // Falls Timer abgelaufen ist (Sudden Death): Bildschirm wackelt
+      if (gameState.timer <= 0 && !gameState.gameOver) {
+        let shakeX = (Math.random() - 0.5) * 10;
+        let shakeY = (Math.random() - 0.5) * 10;
+        ctx.translate(shakeX, shakeY);
+      }
+      
+      // Hintergrund zeichnen
+      ctx.fillStyle = gameState.background;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Ballspur zeichnen (mit abnehmender Opazität und kreisförmigem Clip, ohne weiße Ecken)
+      for (let i = 0; i < ballTrail.length; i++) {
+        let trail = ballTrail[i];
+        let alpha = ((i + 1) / ballTrail.length) * Math.min(Math.sqrt(gameState.ballSpeedX ** 2 + gameState.ballSpeedY ** 2) / 10, 1) * 0.5;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(trail.x, trail.y);
+        ctx.rotate(trail.angle);
+        ctx.beginPath();
+        ctx.arc(0, 0, 40, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+        if (imageLoaded) {
+          ctx.drawImage(ballImg, -40, -40, 80, 80);
+        } else {
+          ctx.fillStyle = "white";
+          ctx.beginPath();
+          ctx.arc(0, 0, 40, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+      
+      // Paddel zeichnen in Neon-Blau
+      ctx.fillStyle = "#00FFFF";
+      ctx.fillRect(0, gameState.playerY, 10, 80);
+      ctx.fillRect(canvas.width - 10, gameState.opponentY, 10, 80);
+      
+      // Ball zeichnen (mit Rotation, kreisförmigem Clip, mit neon-blauem Rahmen)
+      ctx.save();
+      ctx.translate(gameState.ballX, gameState.ballY);
+      ctx.rotate(ballAngle);
+      ctx.beginPath();
+      ctx.arc(0, 0, 40, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.clip();
+      if (imageLoaded) {
+        ctx.drawImage(ballImg, -40, -40, 80, 80);
+      } else {
+        ctx.fillStyle = "white";
+        ctx.beginPath();
+        ctx.arc(0, 0, 40, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+      // Neon-blauer Rahmen um den Ball
+      ctx.save();
+      ctx.strokeStyle = "#00FFFF";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(gameState.ballX, gameState.ballY, 40, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      
+      // Punktestand, Timer und Spielernamen mit Krone anzeigen
+      ctx.font = "20px Arial";
+      ctx.fillStyle = "white";
+      let p1Text = player1Name + ": " + gameState.playerScore;
+      let p2Text = player2Name + ": " + gameState.opponentScore;
+      if (crownOwner === player1Name) {
+        p1Text = "👑 " + p1Text;
+      }
+      if (crownOwner === player2Name) {
+        p2Text = "👑 " + p2Text;
+      }
+      ctx.fillText(p1Text, 20, 30);
+      ctx.fillText(p2Text, canvas.width - ctx.measureText(p2Text).width - 20, 30);
+      ctx.fillText("Timer: " + Math.floor(gameState.timer), canvas.width / 2 - 40, 30);
+      
+      ctx.restore();
+      
+      // Roter Überzug im Sudden-Death: Wird oben gezeichnet
+      if (gameState.timer <= 0 && !gameState.gameOver) {
+        ctx.fillStyle = "rgba(255, 0, 0, 0.2)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      
+      // Gewinneranzeige und Konfetti bei Spielende
+      if (gameState.gameOver) {
+        ctx.font = "40px Arial";
+        let text = gameState.winner + " gewinnt!";
+        let textWidth = ctx.measureText(text).width;
+        ctx.fillText(text, (canvas.width - textWidth) / 2, canvas.height / 2);
+        drawConfetti();
+      }
+    }
+    
+    function gameLoop() {
+      update();
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+    gameLoop();
+  </script>
+</body>
+</html>
